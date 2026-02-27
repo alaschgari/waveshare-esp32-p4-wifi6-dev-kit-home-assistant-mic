@@ -3,7 +3,7 @@ esphome:
   friendly_name: "ESP32-P4 Voice Satellite"
   project:
     name: "waveshare.esp32-p4-micro"
-    version: "1.2"
+    version: "1.3"
 
 esp32:
   board: esp32-p4-evboard
@@ -125,6 +125,14 @@ microphone:
     i2s_din_pin: GPIO11
     adc_type: external
     pdm: false
+    bits_per_sample: 16bit
+
+sensor:
+  - platform: sound_level
+    name: "Microphone Noise Level"
+    id: my_sound_level
+    microphone: my_mic
+    update_interval: 1s
 
 # -------------------------------------------------------------------
 # VOICE ASSISTANT (openWakeWord)
