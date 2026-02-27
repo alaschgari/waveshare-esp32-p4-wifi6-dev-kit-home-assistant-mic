@@ -3,7 +3,15 @@ esphome:
   friendly_name: "ESP32-P4 Voice Satellite"
   project:
     name: "waveshare.esp32-p4-micro"
-    version: "1.13"
+    version: "1.15"
+  on_boot:
+    priority: 100
+    lambda: |-
+      // Fix ES8311 Register 0x14: ESPHome configures it to 0x5A (Digital Mic)
+      // Waveshare needs Analog Mic (0x1A or 0x00). 0x1A enables PGA with max gain.
+      uint8_t data = 0x1A;
+      id(bus_a).write_byte(0x18, 0x14, data);
+      ESP_LOGI("es8311_fix", "Fixed Register 0x14 to 0x1A (Analog Mic Mode)");
 
 esp32:
   board: esp32-p4-evboard
@@ -23,7 +31,7 @@ logger:
     component: INFO
 
 # -------------------------------------------------------------------
-# NETZWERK ANBINDUNG ÜBER ETHERNET (LAN)
+# NETZWERK ANBINDUNG
 # -------------------------------------------------------------------
 ethernet:
   type: IP101
@@ -35,9 +43,6 @@ ethernet:
     pin: GPIO50
   phy_addr: 1
 
-# -------------------------------------------------------------------
-# HOME ASSISTANT / API & OTA
-# -------------------------------------------------------------------
 api:
   encryption:
     key: !secret encryption_key
@@ -63,9 +68,10 @@ audio_dac:
     address: 0x18
     use_mclk: True
     use_microphone: true
-    mic_gain: 30DB # Reduziert für bessere Sprachqualität
+    mic_gain: 30DB
     sample_rate: 16000
     bits_per_sample: 16bit
+    mclk_multiple: 384 # Erhöht auf 384x (Waveshare Standard)
 
 # -------------------------------------------------------------------
 # I2S AUDIO BUS
@@ -118,7 +124,7 @@ media_player:
     codec_support_enabled: true
 
 # -------------------------------------------------------------------
-# MIKROFON (RECORDING)
+# MIKROFON
 # -------------------------------------------------------------------
 microphone:
   - platform: i2s_audio
@@ -131,7 +137,7 @@ microphone:
     channel: left
 
 # -------------------------------------------------------------------
-# VOICE ASSISTANT (Manual Trigger Only)
+# VOICE ASSISTANT
 # -------------------------------------------------------------------
 voice_assistant:
   id: va
