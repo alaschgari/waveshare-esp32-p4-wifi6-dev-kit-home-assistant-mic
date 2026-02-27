@@ -39,7 +39,7 @@ ethernet:
 # -------------------------------------------------------------------
 api:
   encryption:
-    key: "9vP+H6+8vX/yXn7xP7+9vX/yXn7xP7+9vX/yXn7xP78="
+    key: !secret encryption_key
 
 ota:
   - platform: esphome
