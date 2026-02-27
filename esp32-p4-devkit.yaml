@@ -3,17 +3,15 @@ esphome:
   friendly_name: "ESP32-P4 Voice Satellite"
   project:
     name: "waveshare.esp32-p4-micro"
-    version: "1.18"
+    version: "1.19"
   on_boot:
     - priority: 100.0
       then:
         - lambda: |-
-            // Fix ES8311 Register 0x14: ESPHome configures it to 0x5A (Digital Mic)
-            // Waveshare needs Analog Mic (0x1A or 0x00). 0x1A enables PGA with max gain.
-            // Address 0x18 is the ES8311, Register 0x14 is the System/DMIC control.
-            uint8_t data = 0x1A;
-            id(bus_a).write_byte(0x18, 0x14, data);
-            ESP_LOGI("es8311_fix", "Fixed Register 0x14 to 0x1A (Analog Mic Mode)");
+            // Fix ES8311 Register 0x14 using the DAC object's API (framework-agnostic)
+            // Register 0x14: 0x1A enables PGA with max gain and sets Analog Mic mode.
+            id(es8311_dac).write_byte(0x14, 0x1A);
+            ESP_LOGI("es8311_fix", "Fixed Register 0x14 to 0x1A (Analog Mic Mode) via DAC object");
 
 esp32:
   board: esp32-p4-evboard
