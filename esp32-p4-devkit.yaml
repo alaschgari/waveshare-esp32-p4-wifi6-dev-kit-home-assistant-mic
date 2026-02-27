@@ -3,7 +3,7 @@ esphome:
   friendly_name: "ESP32-P4 Voice Satellite"
   project:
     name: "waveshare.esp32-p4-micro"
-    version: "1.11"
+    version: "1.12"
 
 esp32:
   board: esp32-p4-evboard
@@ -15,7 +15,7 @@ esp32:
 
 logger:
   hardware_uart: UART0
-  level: DEBUG # Reduziert von VERY_VERBOSE, um Watchdog-Crash zu vermeiden
+  level: DEBUG
   logs:
     voice_assistant: DEBUG
     microphone: DEBUG
@@ -128,7 +128,7 @@ microphone:
     adc_type: external
     pdm: false
     bits_per_sample: 16bit
-    channel: mono # Testweise zurück auf mono, da in v1.10 der Ramp-Counter kam
+    channel: left # Zurück auf 'left', da 'mono' vom Validator abgelehnt wird
 
 # -------------------------------------------------------------------
 # VOICE ASSISTANT (Manual Trigger Only)
