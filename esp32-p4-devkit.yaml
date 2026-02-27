@@ -66,7 +66,7 @@ i2s_audio:
     use_legacy: false
 
 # -------------------------------------------------------------------
-# AUDIO PIPELINE (Mixer & Resampler für Stabilität)
+# AUDIO PIPELINE (Mixer & Resampler)
 # -------------------------------------------------------------------
 speaker:
   - platform: i2s_audio
@@ -93,7 +93,7 @@ speaker:
     output_speaker: announcement_spk_mixer_input
 
 # -------------------------------------------------------------------
-# MEDIA PLAYER & VOICE ASSISTANT
+# MEDIA PLAYER
 # -------------------------------------------------------------------
 media_player:
   - platform: speaker
@@ -105,7 +105,9 @@ media_player:
       speaker: announcement_spk_resampler
     codec_support_enabled: true
 
-# Das Mikrofon-Objekt
+# -------------------------------------------------------------------
+# MIKROFON (RECORDING)
+# -------------------------------------------------------------------
 microphone:
   - platform: i2s_audio
     id: my_mic
@@ -114,12 +116,15 @@ microphone:
     adc_type: external
     pdm: false
 
-# Brücke zwischen Mikrofon und Speaker für Home Assistant Voice Assist
+# -------------------------------------------------------------------
+# VOICE ASSISTANT (openWakeWord)
+# -------------------------------------------------------------------
 voice_assistant:
   id: va
   microphone: my_mic
-  speaker: speaker_media_player
-  use_wake_word: true # Aktiviert die Erkennung über Home Assistant (openWakeWord)
+  # WICHTIG: Muss auf den 'speaker' (Mixer) zeigen, nicht auf den 'media_player'
+  speaker: main_audio_mixer 
+  use_wake_word: true
 
 # -------------------------------------------------------------------
 # VERSTÄRKER KONTROLLE (NS4150B)
