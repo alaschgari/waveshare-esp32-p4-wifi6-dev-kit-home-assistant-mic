@@ -2,15 +2,16 @@ esphome:
   name: esp32-p4-satellite
   friendly_name: "ESP32-P4 Voice Satellite"
   project:
-    name: "waveshare.ESP32-P4-WIFI6-DEV-KIT-MICROPHONE-FOR-HOME-ASSISTANT"
-    version: "1.21"
+    name: "WAVESHARE-ESP32-P4-WIFI6-DEV-KIT-MICROPHONE-FOR-HOME-ASSISTANT"
+    version: "1.22"
   on_boot:
     - priority: 100.0
       then:
         - lambda: |-
-            // Initial analog mic fix
+            // Initial analog mic fix + default gain (30dB = 0xA)
+            // Register 0x14: Bit 6=0, Bits 0-3=0xA -> 0x1A
             id(es8311_dac).write_byte(0x14, 0x1A);
-            ESP_LOGI("es8311_fix", "Analog Mic Mode forced on boot");
+            ESP_LOGI("es8311_fix", "Analog Mic Mode forced on boot (30dB)");
 
 esp32:
   board: esp32-p4-evboard
@@ -106,7 +107,7 @@ speaker:
 
   - platform: resampler
     id: announcement_spk_resampler
-    output_speaker: announcement_spk_mixer_input
+    output_speaker: announcement_spk_resampler
 
 # -------------------------------------------------------------------
 # MEDIA PLAYER
@@ -142,7 +143,7 @@ voice_assistant:
   microphone: my_mic
   speaker: announcement_spk_resampler 
   use_wake_word: true
-  noise_suppression_level: 2  # Hier ist der richtige Platz
+  noise_suppression_level: 2
   on_listening:
     - logger.log: "Voice Assistant started listening..."
   on_error:
@@ -161,6 +162,14 @@ number:
     unit_of_measurement: "dB"
     initial_value: 30
     optimistic: true
+    on_value:
+      - lambda: |-
+          // ES8311 Register 0x14: Bits 0-3 = Gain (0-14), Bit 6 = Analog (0)
+          uint8_t index = (uint8_t)(x / 3.0);
+          if (index > 14) index = 14; 
+          uint8_t reg_val = 0x10 | index; 
+          id(es8311_dac).write_byte(0x14, reg_val);
+          ESP_LOGI("config", "ES8311 Mic Gain set to: %.0f dB (Reg 0x14: 0x%02X)", x, reg_val);
 
   - platform: template
     name: "Noise Suppression Level"
@@ -170,6 +179,25 @@ number:
     step: 1
     initial_value: 2
     optimistic: true
+    on_value:
+      - lambda: |-
+          ESP_LOGI("config", "New Noise Suppression Level: %.0f", x);
+
+  - platform: template
+    name: "Speaker Volume"
+    id: spk_volume_control
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    initial_value: 80
+    optimistic: true
+    on_value:
+      - lambda: |-
+          // ES8311 Reg 0x32: Volume control
+          uint8_t reg_val = (uint8_t)((100.0 - x) * 1.9); 
+          id(es8311_dac).write_byte(0x32, reg_val);
+          ESP_LOGI("config", "Speaker Volume set to: %.0f%% (Reg 0x32: 0x%02X)", x, reg_val);
 
 # -------------------------------------------------------------------
 # VERSTÄRKER KONTROLLE
