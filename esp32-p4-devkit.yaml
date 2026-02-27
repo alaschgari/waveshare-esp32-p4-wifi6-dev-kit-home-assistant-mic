@@ -18,8 +18,9 @@ logger:
   level: VERY_VERBOSE
   logs:
     microphone: VERY_VERBOSE
-    voice_assistant: DEBUG
-    i2s_audio: DEBUG
+    voice_assistant: VERY_VERBOSE
+    i2s_audio: VERY_VERBOSE
+    component: VERY_VERBOSE
 
 # -------------------------------------------------------------------
 # NETZWERK ANBINDUNG ÜBER ETHERNET (LAN)
@@ -53,6 +54,7 @@ i2c:
   scl: GPIO8
   scan: true
   id: bus_a
+  frequency: 100kHz
 
 audio_dac:
   - platform: es8311
@@ -61,7 +63,7 @@ audio_dac:
     address: 0x18
     use_mclk: True
     use_microphone: true
-    mic_gain: 42DB
+    mic_gain: 30DB
     sample_rate: 16000
     bits_per_sample: 16bit
 
@@ -126,6 +128,7 @@ microphone:
     adc_type: external
     pdm: false
     bits_per_sample: 16bit
+    channel: mono
 
 sensor:
   - platform: sound_level
