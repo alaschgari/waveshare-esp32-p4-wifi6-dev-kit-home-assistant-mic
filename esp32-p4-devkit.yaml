@@ -3,18 +3,21 @@ esphome:
   friendly_name: "ESP32-P4 Voice Satellite"
   project:
     name: "waveshare.esp32_p4_mic_ha"
-    version: "1.25"
+    version: "2.0"
+  platformio_options:
+    board_build.flash_mode: dio
   on_boot:
-    - priority: 100.0
+    - priority: -200
       then:
-        - lambda: |-
-            // Initial analog mic fix + default gain (30dB = 0xA)
-            // Register 0x14: Bit 6=0, Bits 0-3=0xA -> 0x1A
-            id(es8311_dac).write_byte(0x14, 0x1A);
-            ESP_LOGI("es8311_fix", "Analog Mic Mode forced on boot (30dB)");
+        - switch.turn_on: amp_enable
+        - delay: 200ms
+        - audio_dac.set_volume:
+            id: es8311_dac
+            volume: 85%
 
 esp32:
   board: esp32-p4-evboard
+  variant: esp32p4
   flash_size: 16MB
   framework:
     type: esp-idf
@@ -25,13 +28,18 @@ logger:
   hardware_uart: UART0
   level: DEBUG
   logs:
-    voice_assistant: DEBUG
-    microphone: DEBUG
     i2s_audio: DEBUG
+    i2s_audio.speaker: DEBUG
+    speaker: DEBUG
     component: INFO
+    ethernet: INFO
+    api: INFO
+    api.connection: INFO
+    mdns: INFO
+    safe_mode: INFO
 
 # -------------------------------------------------------------------
-# NETZWERK ANBINDUNG (Ethernet only)
+# NETZWERK ANBINDUNG (Ethernet only – kein WiFi nötig)
 # -------------------------------------------------------------------
 ethernet:
   type: IP101
@@ -42,14 +50,26 @@ ethernet:
     mode: CLK_EXT_IN
     pin: GPIO50
   phy_addr: 1
+  domain: ".local"
 
 api:
   encryption:
     key: !secret encryption_key
+  on_client_connected:
+    - logger.log: "Home Assistant API connected!"
+    - micro_wake_word.start:
+    - lambda: |-
+        id(va_state).publish_state("Bereit (Hey Jarvis)");
+  on_client_disconnected:
+    - logger.log: "Home Assistant API disconnected!"
+    - voice_assistant.stop:
+    - micro_wake_word.stop:
+    - lambda: |-
+        id(va_state).publish_state("Keine API-Verbindung");
 
 ota:
   - platform: esphome
-    password: !secret wifi_password 
+    password: !secret wifi_password
 
 # -------------------------------------------------------------------
 # I2C & AUDIO CODEC (ES8311)
@@ -67,8 +87,8 @@ audio_dac:
     i2c_id: bus_a
     address: 0x18
     use_mclk: True
-    use_microphone: true
-    mic_gain: 30DB
+    use_microphone: True
+    mic_gain: 42DB
     sample_rate: 16000
     bits_per_sample: 16bit
 
@@ -93,6 +113,10 @@ speaker:
     i2s_dout_pin: GPIO9
     audio_dac: es8311_dac
     channel: mono
+    num_channels: 1
+    buffer_duration: 300ms
+    sample_rate: 16000
+    bits_per_sample: 16bit
 
   - platform: mixer
     id: main_audio_mixer
@@ -118,8 +142,10 @@ media_player:
     id: speaker_media_player
     media_pipeline:
       speaker: media_spk_resampler
+      num_channels: 1
     announcement_pipeline:
       speaker: announcement_spk_resampler
+      num_channels: 1
     codec_support_enabled: true
 
 # -------------------------------------------------------------------
@@ -131,9 +157,29 @@ microphone:
     i2s_audio_id: i2s_bus
     i2s_din_pin: GPIO11
     adc_type: external
-    pdm: false
-    bits_per_sample: 16bit
-    channel: left
+    bits_per_channel: default
+
+# -------------------------------------------------------------------
+# MICRO WAKE WORD – \"Hey Jarvis\" + \"Okay Nabu\" (Debug-Modus)
+# -------------------------------------------------------------------
+micro_wake_word:
+  models:
+    - model: hey_jarvis
+      probability_cutoff: 0.6
+      sliding_window_size: 5
+    - model: okay_nabu
+      probability_cutoff: 0.5
+      sliding_window_size: 5
+  on_wake_word_detected:
+    - logger.log:
+        format: \">>> WAKE WORD erkannt! Stoppe Mic, starte VA... <<<\"
+        level: WARN
+    - lambda: |-
+        id(va_state).publish_state(\"Wake Word erkannt!\");
+    # MWW muss ZUERST stoppen → gibt Mic/I2S Bus frei
+    - micro_wake_word.stop:
+    - delay: 300ms
+    - voice_assistant.start:
 
 # -------------------------------------------------------------------
 # VOICE ASSISTANT
@@ -141,25 +187,104 @@ microphone:
 voice_assistant:
   id: va
   microphone: my_mic
-  speaker: announcement_spk_resampler 
-  use_wake_word: true
+  speaker: announcement_spk_resampler
   noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+
   on_listening:
-    - logger.log: "Voice Assistant started listening..."
+    - logger.log:
+        level: WARN
+        format: \"VA: Höre zu...\"
+    - lambda: |-
+        id(va_state).publish_state(\"Höre zu...\");
+
+  on_stt_vad_end:
+    - logger.log:
+        level: WARN
+        format: \"VA: Sprache erkannt, stoppe Mic für Speaker...\"
+    - lambda: |-
+        id(va_state).publish_state(\"Verarbeite...\");
+
+  on_stt_end:
+    - logger.log:
+        level: WARN
+        format: \"VA STT: %s\"
+        args: ['x.c_str()']
+    - lambda: |-
+        id(va_state).publish_state(\"Erkannt: \" + x);
+
+  on_tts_start:
+    - logger.log:
+        level: WARN
+        format: \"VA TTS: %s\"
+        args: ['x.c_str()']
+    - lambda: |-
+        id(va_state).publish_state(\"Antwort: \" + x);
+
+  on_tts_end:
+    - logger.log:
+        level: WARN
+        format: \"VA: TTS Wiedergabe beendet\"
+
+  on_end:
+    - logger.log:
+        level: WARN
+        format: \"VA: Pipeline beendet, warte auf Speaker...\"
+    - script.execute: wait_and_restart_wakeword
+
   on_error:
-    - logger.log: "Voice Assistant Error!"
+    - logger.log:
+        level: ERROR
+        format: \"VA Fehler: %s (Code: %s)\"
+        args: ['code.c_str()', 'message.c_str()']
+    - lambda: |-
+        id(va_state).publish_state(\"Fehler!\");
+    # Nach Fehler trotzdem Wake Word neustarten
+    - delay: 2s
+    - micro_wake_word.start:
 
 # -------------------------------------------------------------------
-# EXPOSED CONTROLS (HOME ASSISTANT)
+# SCRIPT: Warte bis Speaker fertig, dann Wake Word restart
+# -------------------------------------------------------------------
+script:
+  - id: wait_and_restart_wakeword
+    mode: restart
+    then:
+      - lambda: |-
+          id(va_state).publish_state(\"Spielt Audio...\");
+      # Warte bis Speaker anfängt zu spielen (max 10s)
+      - wait_until:
+          timeout: 10s
+          condition:
+            lambda: 'return id(i2s_speaker_out).is_running();'
+      - logger.log:
+          level: WARN
+          format: \"Speaker spielt, warte auf Ende...\"
+      # Warte bis Speaker fertig ist (max 60s)
+      - wait_until:
+          timeout: 60s
+          condition:
+            lambda: 'return !id(i2s_speaker_out).is_running();'
+      - logger.log:
+          level: WARN
+          format: \"Speaker gestoppt, starte Wake Word...\"
+      - delay: 500ms
+      - micro_wake_word.start:
+      - lambda: |-
+          id(va_state).publish_state(\"Bereit (Hey Jarvis)\");
+
+# -------------------------------------------------------------------
+# STEUERUNGSELEMENTE (HOME ASSISTANT)
 # -------------------------------------------------------------------
 number:
   - platform: template
-    name: "Microphone Gain"
+    name: \"Microphone Gain\"
     id: mic_gain_control
     min_value: 0
     max_value: 42
     step: 3
-    unit_of_measurement: "dB"
+    unit_of_measurement: \"dB\"
     initial_value: 30
     optimistic: true
     on_value:
@@ -168,10 +293,10 @@ number:
           if (index > 14) index = 14; 
           uint8_t reg_val = 0x10 | index; 
           id(es8311_dac).write_byte(0x14, reg_val);
-          ESP_LOGI("config", "ES8311 Mic Gain set to: %.0f dB (Reg 0x14: 0x%02X)", x, reg_val);
+          ESP_LOGI(\"config\", \"ES8311 Mic Gain set to: %.0f dB (Reg 0x14: 0x%02X)\", x, reg_val);
 
   - platform: template
-    name: "Noise Suppression Level"
+    name: \"Noise Suppression Level\"
     id: ns_level_control
     min_value: 0
     max_value: 4
@@ -180,22 +305,22 @@ number:
     optimistic: true
     on_value:
       - lambda: |-
-          ESP_LOGI("config", "New Noise Suppression Level: %.0f", x);
+          ESP_LOGI(\"config\", \"New Noise Suppression Level: %.0f\", x);
 
   - platform: template
-    name: "Speaker Volume"
+    name: \"Speaker Volume\"
     id: spk_volume_control
     min_value: 0
     max_value: 100
     step: 1
-    unit_of_measurement: "%"
+    unit_of_measurement: \"%\"
     initial_value: 80
     optimistic: true
     on_value:
       - lambda: |-
           uint8_t reg_val = (uint8_t)((100.0 - x) * 1.9); 
           id(es8311_dac).write_byte(0x32, reg_val);
-          ESP_LOGI("config", "Speaker Volume set to: %.0f%% (Reg 0x32: 0x%02X)", x, reg_val);
+          ESP_LOGI(\"config\", \"Speaker Volume set to: %.0f%% (Reg 0x32: 0x%02X)\", x, reg_val);
 
 # -------------------------------------------------------------------
 # VERSTÄRKER KONTROLLE
@@ -203,7 +328,7 @@ number:
 switch:
   - platform: gpio
     pin: GPIO53
-    name: "Amplifier Enable"
+    name: \"Amplifier Enable\"
     id: amp_enable
     restore_mode: ALWAYS_ON
 
@@ -212,22 +337,47 @@ switch:
 # -------------------------------------------------------------------
 button:
   - platform: template
-    name: "Manual Voice Assist Start"
-    id: manual_va_start
+    name: \"Speaker Diagnostics\"
+    id: speaker_diag
+    icon: \"mdi:stethoscope\"
     on_press:
-      - voice_assistant.start:
+      - lambda: |-
+          ESP_LOGW(\"diag\", \"========== DIAGNOSTICS ==========\");
+          ESP_LOGW(\"diag\", \"Free Heap: %u bytes\", esp_get_free_heap_size());
+          ESP_LOGW(\"diag\", \"Amp: %s\", id(amp_enable).state ? \"ON\" : \"OFF\");
+          uint8_t val;
+          id(es8311_dac).read_byte(0x37, &val);
+          ESP_LOGW(\"diag\", \"DAC Power (0x37): 0x%02X (0x08=on)\", val);
+          id(es8311_dac).read_byte(0x33, &val);
+          ESP_LOGW(\"diag\", \"DAC Mute (0x33): 0x%02X (0x00=unmuted)\", val);
+          ESP_LOGW(\"diag\", \"=================================\");
 
   - platform: template
-    name: "Manual Voice Assist Stop"
-    id: manual_va_stop
+    name: \"Play Test Sound\"
+    id: play_test_tone_synth
+    icon: \"mdi:volume-high\"
     on_press:
-      - voice_assistant.stop:
+      - micro_wake_word.stop:
+      - delay: 500ms
+      - lambda: |-
+          std::vector<uint8_t> data;
+          for (int i = 0; i < 8000; i++) {
+              int16_t sample = ((i / 8) % 2 == 0) ? 32000 : -32000;
+              data.push_back(sample & 0xFF);
+              data.push_back((sample >> 8) & 0xFF);
+          }
+          id(i2s_speaker_out).play(data.data(), data.size());
+          ESP_LOGI(\"test\", \"Test tone played\");
+      - delay: 2000ms
+      - micro_wake_word.start:
 
+# -------------------------------------------------------------------
+# STATUS SENSOR
+# -------------------------------------------------------------------
 text_sensor:
   - platform: template
-    name: "Voice Assistant State"
+    name: \"Voice Assistant State\"
     id: va_state
     lambda: |-
-      if (id(va).is_running()) return {"Listening/Running"};
-      return {"Idle/Stopped"};
-    update_interval: 2s
+      return {};
+    update_interval: never
