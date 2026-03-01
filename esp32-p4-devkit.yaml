@@ -217,7 +217,10 @@ voice_assistant:
   id: va
   microphone: my_mic
   speaker: announcement_spk_resampler
-  noise_suppression_level: 1
+  # Disable on-device noise suppression completely. 
+  # It often aggressively cancels out distant voices as "background noise".
+  noise_suppression_level: 0
+  # Keep auto_gain high to pick up quiet voices from across the room
   auto_gain: 31dBFS
   volume_multiplier: 1.0
 
@@ -404,7 +407,7 @@ number:
     min_value: 0
     max_value: 4
     step: 1
-    initial_value: 2
+    initial_value: 0
     optimistic: true
     on_value:
       - lambda: |-
